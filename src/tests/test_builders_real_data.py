@@ -9,7 +9,7 @@ import src.feature_engineering as m
 # If you prefer to use your coordinator’s loader directly:
 try:
     # adjust import path/name to your project
-    from src.data.data_loader_coordinator import load_cores_with_auto_fetch
+    from data.data_loader_coordinator import load_cores_with_auto_fetch
     
     print ("Imported load_cores_with_auto_fetch from data_loader_coordinator")
     HAVE_COORDINATOR = True

@@ -1,4 +1,3 @@
-import sqlite3
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -8,44 +7,18 @@ import relative_value as rv
 
 
 # ---------------------------
-# DB discovery helpers
+# Selection helpers (no direct DB access)
 # ---------------------------
 
-def _find_table_with_data(db_path: Path) -> tuple[str, list[str]]:
-    if not db_path.exists():
-        return "", []
-    candidates = [
-        "atm_slices_1m",
-        "processed_merged_1m",
-        "atm_slices_1h",
-        "processed_merged",
-        "merged_1m",
-    ]
-    with sqlite3.connect(str(db_path)) as conn:
-        for table in candidates:
-            try:
-                cur = conn.execute(
-                    f"SELECT ticker, COUNT(1) cnt FROM {table} GROUP BY ticker "
-                    "HAVING cnt > 100 ORDER BY cnt DESC LIMIT 8"
-                )
-                rows = cur.fetchall()
-            except Exception:
-                continue
-            if rows:
-                return table, [r[0] for r in rows]
-    return "", []
-
-
-def _find_recent_window(db_path: Path, table: str, tickers: list[str]) -> tuple[pd.Timestamp, pd.Timestamp]:
-    with sqlite3.connect(str(db_path)) as conn:
-        q = f"SELECT MIN(ts_event), MAX(ts_event) FROM {table} WHERE ticker IN ({','.join(['?']*len(tickers))})"
-        mn, mx = conn.execute(q, tickers).fetchone()
-    if mn is None or mx is None:
-        return pd.NaT, pd.NaT
-    mx_ts = pd.to_datetime(mx, utc=True, errors="coerce")
-    start = (mx_ts - pd.Timedelta(days=1)).normalize()
-    end = mx_ts
-    return start, end
+def _choose_universe_and_window(db_path: Path) -> tuple[list[str], pd.Timestamp, pd.Timestamp]:
+    candidates = ["QBTS", "IONQ", "RGTI", "QUBT", "ASTS"]
+    start = pd.Timestamp("2025-08-04", tz="UTC")
+    end = pd.Timestamp("2025-08-05 19:59", tz="UTC")
+    cores = rv.load_cores_with_auto_fetch(candidates, start, end, db_path=db_path, auto_fetch=False, atm_only=True)
+    if not cores:
+        return [], pd.NaT, pd.NaT
+    tickers = [t for t, df in cores.items() if df is not None and not df.empty][:4]
+    return tickers, start, end
 
 
 # ---------------------------
@@ -59,14 +32,10 @@ def db_path() -> Path:
 
 @pytest.fixture(scope="module")
 def universe(db_path):
-    table, tickers = _find_table_with_data(db_path)
-    if not table or len(tickers) < 2:
-        pytest.skip("No suitable table/tickers found in local DB")
-    tickers = tickers[:4]
-    start, end = _find_recent_window(db_path, table, tickers)
-    if not pd.notna(start) or not pd.notna(end) or start >= end:
+    tickers, start, end = _choose_universe_and_window(db_path)
+    if len(tickers) < 2 or not pd.notna(start) or not pd.notna(end) or start >= end:
         pytest.skip("Could not determine a recent window with data")
-    return {"table": table, "tickers": tickers, "start": start, "end": end}
+    return {"tickers": tickers, "start": start, "end": end}
 
 
 # ---------------------------
