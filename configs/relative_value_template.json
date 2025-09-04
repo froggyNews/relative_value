@@ -1,0 +1,35 @@
+{
+  "data": {
+    "tickers": ["QBTS", "IONQ", "RGTI", "QUBT"],
+    "start": "2025-06-02",
+    "end": "2025-06-16",
+    "db_path": "data/iv_data_1m.db",
+    "auto_fetch": true,
+    "surface_mode": "atm"
+  },
+  "model": {
+    "forward_steps": 1,
+    "test_frac": 0.2,
+    "tolerance": "15s",
+    "r": 0.045
+  },
+  "liquidity": {
+    "min_roll_trades": 0.0,
+    "roll_by_rows": true,
+    "roll_bars": 30,
+    "roll_window": "30min",
+    "volume_col": null
+  },
+  "trading": {
+    "top_k": 1,
+    "threshold": 0.0,
+    "pair_only": false,
+    "strike": null,
+    "expiry": null,
+    "strike_tol": 0.0,
+    "group_freq": "1min"
+  },
+  "output": {
+    "save_trades_csv": "outputs/relative_value_trades.csv"
+  }
+}
