@@ -2,9 +2,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+# Robustly skip if xgboost cannot be imported or initialized in this env
+try:
+    import xgboost as _xgb  # noqa: F401
+except Exception as _e:  # includes XGBoostError during DLL load
+    pytest.skip(f"xgboost unavailable: {_e}", allow_module_level=True)
+
 
 def test_make_prediction_frame_with_xgb():
-    xgb = pytest.importorskip("xgboost")
+    import xgboost as xgb
     from src.modeling.predict import make_prediction_frame
 
     # Train a tiny model to get feature_names_in_
@@ -36,4 +42,3 @@ def test_make_prediction_frame_with_xgb():
     # Edges computed or set to NaN
     for c in ("edge_1m", "edge_15m", "edge_60m"):
         assert c in out.columns
-

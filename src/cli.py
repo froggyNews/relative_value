@@ -5,6 +5,13 @@ from dataclasses import asdict
 from pathlib import Path
 import argparse
 import json
+import os
+import sys
+from dotenv import load_dotenv
+
+# Allow running this file directly (python src/cli.py) by adding project root
+if __name__ == "__main__" and (__package__ is None or __package__ == ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.modeling.schemas import BacktestConfig
 from src.backtest.run import run_backtest
@@ -20,11 +27,14 @@ def _config_to_backtest(cfg: dict) -> BacktestConfig:
     trading = cfg.get("trading", {})
     output = cfg.get("output", {})
 
+    # Prefer env var if provided and config is missing db_path
+    env_db = os.getenv("IV_DB_PATH")
+
     return BacktestConfig(
         tickers=data.get("tickers", ["QBTS", "IONQ", "RGTI", "QUBT"]),
         start=data.get("start", "2025-06-02"),
         end=data.get("end", "2025-06-16"),
-        db_path=Path(data.get("db_path", "data/iv_data_1m.db")),
+        db_path=Path(data.get("db_path") or env_db or "IV_DB_PATH"),
         auto_fetch=bool(data.get("auto_fetch", True)),
         atm_only=(str(data.get("surface_mode", "atm")).lower() == "atm"),
 
@@ -42,7 +52,7 @@ def _config_to_backtest(cfg: dict) -> BacktestConfig:
         top_k=int(trading.get("top_k", 1)),
         threshold=float(trading.get("threshold", 0.0)),
         pair_only=bool(trading.get("pair_only", False)),
-        strike=trading.get("strike", None),
+        strike=trading.get("strike_price", None),
         expiry=trading.get("expiry", None),
         strike_tol=float(trading.get("strike_tol", 0.0)),
         group_freq=str(trading.get("group_freq", "1min")),
@@ -61,9 +71,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--test-frac", type=float, default=0.2, help="Test fraction for time split")
     p.add_argument("--tolerance", default="15s", help="As-of merge tolerance for panel")
     p.add_argument("--r", type=float, default=0.045, help="Risk-free rate for Greeks/IV calc")
-    p.add_argument("--db", type=str, default="data/iv_data_1m.db", help="SQLite DB path")
+    p.add_argument("--db", type=str, default=os.getenv("IV_DB_PATH", "IV_DB_PATH"), help="SQLite DB path (or set IV_DB_PATH)")
     p.add_argument("--top-k", type=int, default=1, help="Number of names in each leg")
-    p.add_argument("--threshold", type=float, default=0.0, help="Min predicted spread to trade")
+    p.add_argument("--threshold", type=float, default=0.0, help="Min predicted edge to trade")
     p.add_argument("--save-trades", type=str, default="", help="Optional CSV path to save trades")
     p.add_argument("--no-fetch", action="store_true", help="Disable auto-fetch; require data to already exist")
     p.add_argument("--surface-mode", choices=["atm", "full"], default="atm", help="Use ATM-only or full surface cores")
@@ -78,9 +88,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--strike", type=float, default=None, help="Restrict to a specific strike")
     p.add_argument("--expiry", type=str, default=None, help="Restrict to a specific expiry YYYY-MM-DD")
     p.add_argument("--strike-tol", type=float, default=0.0, help="Tolerance for strike matching (abs)")
+
+    p.add_argument("--granularity", type=str, choices=["contract", "slice", "surface"], default="slice", help="Granularity level for trading")
+    p.add_argument("--weighting-scheme", type=str, choices=["opt_volume", "vega", "vega_x_liquidity", "equal"], default="opt_volume", help="Weighting scheme for legs")
+    p.add_argument("--dte-range", type=float, nargs=2, default=(20, 45), help="DTE range (min max) for 'slice' granularity")
+    p.add_argument("--moneyness-range", type=float, nargs=2, default=None, help="Moneyness range (min max) in log-moneyness")
+
     return p.parse_args()
 
 def main() -> None:
+    load_dotenv()
     args = parse_args()
 
     # Write template and exit
@@ -93,7 +110,7 @@ def main() -> None:
                 "tickers": ["QBTS", "IONQ", "RGTI", "QUBT"],
                 "start": "2025-06-02",
                 "end": "2025-06-16",
-                "db_path": "data/iv_data_1m.db",
+                "db_path": "IV_DB_PATH",
                 "auto_fetch": True,
                 "surface_mode": "atm"
             },
@@ -114,10 +131,14 @@ def main() -> None:
                 "top_k": 1,
                 "threshold": 0.0,
                 "pair_only": False,
-                "strike": None,
+                "strike_price": None,
                 "expiry": None,
                 "strike_tol": 0.0,
-                "group_freq": "1min"
+                "group_freq": "1min",
+                "granularity": "slice",
+                "weighting_scheme": "opt_volume",
+                "dte_range": (20, 45),
+                "moneyness_range": None
             },
             "output": {
                 "save_trades_csv": "outputs/relative_value_trades.csv"
@@ -136,13 +157,23 @@ def main() -> None:
             cfg.start = args.start
         if args.end:
             cfg.end = args.end
+        # Priority: explicit --db > IV_DB_PATH > config-provided db_path
+        env_db = os.getenv("IV_DB_PATH")
+        if args.db:
+            cfg.db_path = Path(args.db)
+        elif env_db:
+            cfg.db_path = Path(env_db)
         if args.save_trades:
             cfg.save_trades_csv = Path(args.save_trades)
     else:
+        # Build from CLI args only; prefer env var or --db for db_path
+        env_db = os.getenv("IV_DB_PATH")
+        chosen_db = args.db or env_db or "IV_DB_PATH"
         cfg = BacktestConfig(
             tickers=args.tickers,
             start=args.start or "2025-06-02",
             end=args.end or "2025-06-16",
+            db_path=Path(chosen_db),
         )
         if args.save_trades:
             cfg.save_trades_csv = Path(args.save_trades)

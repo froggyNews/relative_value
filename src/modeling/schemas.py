@@ -16,7 +16,7 @@ class BacktestConfig:
     test_frac: float = 0.2
     tolerance: str = "15s"
     r: float = 0.045
-    db_path: Path | str = Path("data/iv_data_1m.db")
+    db_path: Path | str = Path("IV_DB_PATH")
     top_k: int = 1
     threshold: float = 0.0
     save_trades_csv: Optional[Path] = None
@@ -34,6 +34,10 @@ class BacktestConfig:
     strike: Optional[float] = None
     expiry: Optional[str] = None  # YYYY-MM-DD
     strike_tol: float = 0.0
+    granularity: str = "slice"          # "contract" | "slice" | "surface"
+    weighting_scheme: str = "opt_volume" # "opt_volume" | "vega" | "vega_x_liquidity" | "equal"
+    dte_range: tuple[float, float] | None = (20, 45)  # days, for "slice"
+    moneyness_range: tuple[float, float] | None = None  # e.g., (-0.1, 0.1) in log-moneyness
 
 @dataclass
 class ModelBundle:

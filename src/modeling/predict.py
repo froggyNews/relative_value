@@ -58,11 +58,17 @@ def make_prediction_frame(
     strike_te: Optional[pd.Series] = None,
     expiry_te: Optional[pd.Series] = None,
 ) -> pd.DataFrame:
-    """Return a tidy inference DataFrame (ts_event, y_true, y_pred, symbol, strike, expiry, opt_volume, edge_*)."""
+    """Return a tidy inference DataFrame.
+
+    Columns include: ts_event, y_true, y_pred, symbol,
+    strike_price (and alias strike), expiry, dte, opt_volume,
+    optional iv_level and edge_* if panel columns exist.
+    """
     X_aligned = _align_columns_to_model(model, X_te.copy())
     y_pred = model.predict(X_aligned)
+
     out = pd.DataFrame({
-        "ts_event": (pd.to_datetime(ts_te, utc=True, errors="coerce").values if ts_te is not None else (X_te.get("ts_event").values if "ts_event" in X_te.columns else pd.NaT)),
+        "ts_event": pd.to_datetime(ts_te, utc=True, errors="coerce").values if ts_te is not None else pd.NaT,
         "y_true": y_te.values,
         "y_pred": y_pred,
     }, index=X_te.index)
@@ -77,13 +83,28 @@ def make_prediction_frame(
 
     # Attach strike and expiry if provided
     if strike_te is not None:
-        out["strike"] = pd.to_numeric(strike_te, errors="coerce").values
+        out["strike_price"] = pd.to_numeric(strike_te, errors="coerce").values
     else:
-        out["strike"] = np.nan
+        out["strike_price"] = np.nan
+    # Provide user-friendly alias for compatibility with callers/tests
+    out["strike"] = out["strike_price"]
     if expiry_te is not None:
         out["expiry"] = pd.to_datetime(expiry_te, utc=True, errors="coerce").values
     else:
         out["expiry"] = pd.NaT
+    
+    
+    # DTE (days to expiry)
+    if "expiry" in out.columns and "ts_event" in out.columns:
+        ts = pd.to_datetime(out["ts_event"], utc=True, errors="coerce")
+        exp = pd.to_datetime(out["expiry"],  utc=True, errors="coerce")
+        out["dte"] = (exp - ts).dt.total_seconds() / 86400.0
+
+    # Optional carry-throughs if present in X_te
+    if "log_moneyness" in X_te.columns:
+        out["log_moneyness"] = pd.to_numeric(X_te["log_moneyness"], errors="coerce")
+    if "vega" in X_te.columns:
+        out["vega"] = pd.to_numeric(X_te["vega"], errors="coerce")
 
     # Carry through per-row option volume if available (used for rolling trades filter)
     vol_col = None

@@ -15,9 +15,9 @@ def test__safe_table_exists_and_data_exists(tmp_db_path: Path):
         conn.execute(
             "CREATE TABLE atm_slices_1m (ticker TEXT, ts_event TEXT, expiry_date TEXT)"
         )
-        assert dlc._safe_table_exists(conn, "atm_slices_1m") is True
+        assert dlc._table_exists(conn, "atm_slices_1m") is True
 
-        assert dlc._safe_table_exists(conn, "nope_table") is False
+        assert dlc._table_exists(conn, "nope_table") is False
     finally:
         conn.close()
 

@@ -8,14 +8,47 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-import databento as db
+
+# Note: databento is imported lazily inside _fetch() to avoid a hard
+# dependency when this module is imported for non-fetch operations (e.g., tests).
 
 def _ensure_dir(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
 
-def get_conn(db_path: Path) -> sqlite3.Connection:
+def _resolve_db_path(db_path: Path | str) -> Path:
+    """Resolve database path robustly.
+
+    Resolution order:
+    - If `db_path` is provided and absolute, expanduser/vars and use it
+    - If `db_path` is relative and exists from CWD, use it
+    - If `IV_DB_PATH` env var points to an existing file/dir, use that
+    - Otherwise, try relative to the repo root (two levels up from this file)
+    - Finally, return the expanded provided path (creating parent dirs later)
+    """
+    p = Path(str(db_path)).expanduser()
+    if p.is_absolute():
+        return p
+    # CWD relative
+    if p.exists():
+        return p
+    # Environment override
+    env_p = os.getenv("IV_DB_PATH")
+    if env_p:
+        env_path = Path(env_p).expanduser()
+        if env_path.exists() or env_path.parent.exists():
+            return env_path
+    # Try repo root/data
+    repo_root = Path(__file__).resolve().parents[2]
+    candidate = repo_root / p
+    if candidate.exists() or candidate.parent.exists():
+        return candidate
+    return p
+
+
+def get_conn(db_path: Path | str) -> sqlite3.Connection:
+    db_path = _resolve_db_path(db_path)
     _ensure_dir(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -198,13 +231,6 @@ def _calculate_sigma_realized(bars: pd.DataFrame, tz: str = "America/New_York") 
 def _fetch(API_KEY: str, start: pd.Timestamp, end: pd.Timestamp, ticker: str
            ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    # Lazily import databento to avoid hard dependency at module import time
-    try:
-        import databento as db  # type: ignore
-    except Exception as e:
-        raise ImportError(
-            "databento is required for fetching data. Install it in your active interpreter or switch to the project venv."
-        ) from e
     Fetch 1-hour options and equity data for analysis.
     
     Returns
@@ -212,6 +238,13 @@ def _fetch(API_KEY: str, start: pd.Timestamp, end: pd.Timestamp, ticker: str
     Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
         opra_1h, eq_1h, eq_1d (1-hour options, 1-hour equity, daily equity)
     """
+    # Lazily import databento to avoid hard dependency during module import
+    try:
+        import databento as db  # type: ignore
+    except Exception as e:
+        raise ImportError(
+            "databento is required for fetching data. Install it or set up the project venv."
+        ) from e
     client = db.Historical(API_KEY)
     opt_symbol = f"{ticker}.opt"
     
@@ -260,12 +293,12 @@ def _populate_atm(conn: sqlite3.Connection, ticker: str, timeframe: str = "1h") 
         pm.opt_close, pm.stock_close, pm.opt_volume, pm.stock_volume,
         pm.option_type, pm.strike_price, pm.time_to_expiry, pm.moneyness
     FROM (
-        SELECT
+        SELECT 
             pm.ticker, pm.ts_event, pm.expiry_date, pm.opt_symbol, pm.stock_symbol,
             pm.opt_close, pm.stock_close, pm.opt_volume, pm.stock_volume,
             pm.option_type, pm.strike_price, pm.time_to_expiry, pm.moneyness,
             ROW_NUMBER() OVER (
-2025              PARTITION BY pm.ticker, pm.ts_event, pm.expiry_date
+              PARTITION BY pm.ticker, pm.ts_event, pm.expiry_date
               ORDER BY ABS(pm.strike_price - pm.stock_close)
             ) rn
         FROM {source_table} pm
@@ -407,8 +440,9 @@ def preprocess_and_store(API_KEY: str, start: pd.Timestamp, end: pd.Timestamp,
           f"[DONE] {ticker}: {len(p_db)} 1h rows, sigma_annual≈nan")
 
 def fetch_and_save(API_KEY: str, ticker: str, start: pd.Timestamp, end: pd.Timestamp,
-                   db_path: Path, force: bool=False, timeframe: str = "1h") -> Path:
+                   db_path: Path | str, force: bool=False, timeframe: str = "1h") -> Path:
     """Fetch and save data for specified timeframe."""
+    db_path = _resolve_db_path(db_path)
     conn = get_conn(db_path)
     init_schema(conn)
     preprocess_and_store(API_KEY, start, end, ticker, conn, force=force, timeframe=timeframe)
@@ -417,7 +451,7 @@ def fetch_and_save(API_KEY: str, ticker: str, start: pd.Timestamp, end: pd.Times
 
 
 def auto_fetch_missing_data(tickers: list, start: pd.Timestamp, end: pd.Timestamp, 
-                           db_path: Path, API_KEY: str = None, timeframe: str = "1h") -> dict:
+                           db_path: Path | str, API_KEY: str = None, timeframe: str = "1h") -> dict:
     """
     Automatically check for missing data and fetch it if needed.
     
@@ -449,6 +483,7 @@ def auto_fetch_missing_data(tickers: list, start: pd.Timestamp, end: pd.Timestam
     results = {"fetched": [], "skipped": [], "failed": []}
     
     # Ensure database exists and is initialized
+    db_path = _resolve_db_path(db_path)
     if not db_path.exists():
         print(f"📁 Creating new database: {db_path}")
         conn = get_conn(db_path)
@@ -490,7 +525,7 @@ def auto_fetch_missing_data(tickers: list, start: pd.Timestamp, end: pd.Timestam
 
 
 def ensure_data_availability(tickers: list, start: pd.Timestamp, end: pd.Timestamp,
-                            db_path: Path, auto_fetch: bool = True, timeframe: str = "1h") -> bool:
+                            db_path: Path | str, auto_fetch: bool = True, timeframe: str = "1h") -> bool:
     """
     Ensure data is available for all tickers, fetching if needed.
     
@@ -534,7 +569,7 @@ def ensure_data_availability(tickers: list, start: pd.Timestamp, end: pd.Timesta
 def main() -> None:
     load_dotenv()
     ap = argparse.ArgumentParser(description="Fetch options and equity data for analysis")
-    ap.add_argument("--db", required=True, type=Path, help="Database path")
+    ap.add_argument("--db", required=False, type=Path, default=Path(os.getenv("IV_DB_PATH", "data/iv_data_1h.db")), help="Database path (or set IV_DB_PATH)")
     ap.add_argument("--tickers", nargs="+", required=True, help="Ticker symbols")
     ap.add_argument("--start", required=True, help="Start date")
     ap.add_argument("--end", required=True, help="End date")

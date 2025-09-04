@@ -36,6 +36,10 @@ def run_backtest(cfg: BacktestConfig) -> Dict[str, object]:
         expiry=cfg.expiry,
         strike_tol=cfg.strike_tol,
         group_freq=cfg.group_freq,
+        granularity=cfg.granularity,
+        weighting_scheme=cfg.weighting_scheme,
+        dte_range=cfg.dte_range,
+        moneyness_range=cfg.moneyness_range,
     )
     summary = summarize_trades(trades)
 
