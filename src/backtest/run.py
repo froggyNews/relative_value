@@ -6,11 +6,11 @@ from typing import Dict
 
 import pandas as pd
 
-from modeling.schemas import BacktestConfig
-from modeling.trainer import train_xgb_pooled
-from modeling.predict import make_prediction_frame
-from backtest.split import build_and_split_pooled
-from backtest.trades import make_relative_value_trades, summarize_trades
+from src.modeling.schemas import BacktestConfig
+from src.modeling.trainer import train_xgb_pooled
+from src.modeling.predict import make_prediction_frame
+from src.backtest.split import build_and_split_pooled
+from src.backtest.trades import make_relative_value_trades, summarize_trades
 
 def run_backtest(cfg: BacktestConfig) -> Dict[str, object]:
     # Build + split

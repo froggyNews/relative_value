@@ -6,8 +6,8 @@ from pathlib import Path
 import argparse
 import json
 
-from modeling.schemas import BacktestConfig
-from backtest.run import run_backtest
+from src.modeling.schemas import BacktestConfig
+from src.backtest.run import run_backtest
 
 def _load_json_config(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
